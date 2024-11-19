@@ -1,0 +1,275 @@
+package actionservlet;
+
+import jakarta.servlet.*;
+import jakarta.servlet.http.*;
+import java.io.*;
+import java.sql.*;
+import java.util.*;
+import javax.activation.*;
+import javax.mail.*;
+import javax.mail.internet.*;
+import javax.mail.util.ByteArrayDataSource;
+
+import com.itextpdf.html2pdf.HtmlConverter;
+import adminservlet.Question;
+
+@SuppressWarnings("deprecation")
+public class QuizServlet extends HttpServlet {
+
+    private static final long serialVersionUID = 1L;
+    private static final String DB_URL = "jdbc:mysql://localhost:3306/easyleran";
+    private static final String DB_USER = "root";
+    private static final String DB_PASSWORD = "";
+    private static final long QUIZ_DURATION = 150L; // 150 seconds
+
+    @Override
+    protected void doPost(HttpServletRequest request, HttpServletResponse response)
+            throws ServletException, IOException {
+        HttpSession session = request.getSession(false);
+
+        if (session == null || session.getAttribute("userName") == null) {
+            response.sendRedirect("loginuser.jsp");
+            return;
+        }
+
+        String action = request.getParameter("action");
+
+        // Lifeline handling
+        if ("useFiftyFifty".equals(action)) {
+            session.setAttribute("lifelineFiftyFiftyUsed", true);
+        } else if ("useShowAnswer".equals(action)) {
+            session.setAttribute("lifelineShowAnswerUsed", true);
+        }
+
+        String courseName = (String) session.getAttribute("courseName");
+        String userName = (String) session.getAttribute("userName");
+        String userEmail = (String) session.getAttribute("email");
+        Integer userId = (Integer) session.getAttribute("userId");
+
+        // Fetch userId if not in session
+        if (userId == null) {
+            userId = getUserIdFromDatabase(userName);
+            if (userId == null) {
+                response.sendRedirect("loginuser.jsp");
+                return;
+            }
+            session.setAttribute("userId", userId);
+        }
+
+        // Course validation
+        if (courseName == null || courseName.trim().isEmpty()) {
+            response.sendRedirect("quizinstruct.jsp");
+            return;
+        }
+
+        // Quiz handling
+        List<Question> questions = (List<Question>) session.getAttribute("questions");
+        Integer currentQuestionIndex = (Integer) session.getAttribute("currentQuestionIndex");
+
+        if (questions == null) {
+            questions = getQuestionsForCourse(courseName);
+            if (questions.isEmpty()) {
+                request.setAttribute("errorMessage", "No questions available for this course.");
+                request.getRequestDispatcher("errorPage.jsp").forward(request, response);
+                return;
+            }
+
+            session.setAttribute("quizStartTime", System.currentTimeMillis());
+            session.setAttribute("questions", questions);
+            session.setAttribute("currentQuestionIndex", 0);
+            session.setAttribute("score", 0);
+            session.setAttribute("lifelineFiftyFiftyUsed", false);
+            session.setAttribute("lifelineShowAnswerUsed", false);
+        } else {
+            // Answer validation
+            String selectedAnswer = request.getParameter("answer");
+            if (selectedAnswer != null) {
+                List<String> userAnswers = (List<String>) session.getAttribute("userAnswers");
+                if (userAnswers == null) {
+                    userAnswers = new ArrayList<>();
+                    session.setAttribute("userAnswers", userAnswers);
+                }
+                userAnswers.add(selectedAnswer);
+
+                Question currentQuestion = questions.get(currentQuestionIndex);
+                String correctAnswer = currentQuestion.getCorrectAnswer();
+
+                if (selectedAnswer.equals(correctAnswer)) {
+                    int score = (Integer) session.getAttribute("score");
+                    session.setAttribute("score", score + 10);
+                }
+            }
+
+            currentQuestionIndex++;
+            session.setAttribute("currentQuestionIndex", currentQuestionIndex);
+
+            if (currentQuestionIndex >= questions.size()) {
+                finalizeQuiz(request, response, session, userId, courseName, userName, userEmail);
+                return;
+            }
+        }
+
+        long quizStartTime = (Long) session.getAttribute("quizStartTime");
+        long elapsedTime = (System.currentTimeMillis() - quizStartTime) / 1000;
+        long timeRemaining = QUIZ_DURATION - elapsedTime;
+
+        if (timeRemaining <= 0) {
+            response.sendRedirect("quizCompletion.jsp");
+            return;
+        }
+
+        request.setAttribute("timeRemaining", timeRemaining);
+        request.getRequestDispatcher("quizPage.jsp").forward(request, response);
+    }
+
+    private void finalizeQuiz(HttpServletRequest request, HttpServletResponse response, HttpSession session,
+                              Integer userId, String courseName, String userName, String userEmail)
+            throws IOException, ServletException {
+        int finalScore = (Integer) session.getAttribute("score");
+        Integer courseId = getCourseId(courseName);
+
+        storeCertificateData(userId, courseId, finalScore);
+
+        if (finalScore > 70) {
+            String certificateHtml = renderCertificateHtml(request, response, userName, courseName, finalScore);
+            byte[] pdfBytes = convertHtmlToPdf(certificateHtml);
+            boolean emailSent = sendCertificateEmail(userEmail, userName, courseName, pdfBytes);
+            session.setAttribute("alertMessage", emailSent ? "Certificate emailed successfully!" : "Failed to email certificate.");
+        } else {
+            session.setAttribute("alertMessage", "You failed the quiz. Try again.");
+        }
+
+        response.sendRedirect("quizCompletion.jsp");
+    }
+
+    private Integer getUserIdFromDatabase(String userName) {
+        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement ps = connection.prepareStatement("SELECT uid FROM users WHERE uname = ?")) {
+            ps.setString(1, userName);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                return rs.getInt("uid");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    private List<Question> getQuestionsForCourse(String courseName) {
+        List<Question> questions = new ArrayList<>();
+        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement ps = connection.prepareStatement(
+                     "SELECT question_text, option_a, option_b, option_c, option_d, correct_answer " +
+                     "FROM questions WHERE course_id = (SELECT course_id FROM courses WHERE course_name = ?) ORDER BY RAND() LIMIT 15")) {
+            ps.setString(1, courseName);
+            ResultSet rs = ps.executeQuery();
+            while (rs.next()) {
+                Question question = new Question();
+                question.setQuestionText(rs.getString("question_text"));
+                question.setOptionA(rs.getString("option_a"));
+                question.setOptionB(rs.getString("option_b"));
+                question.setOptionC(rs.getString("option_c"));
+                question.setOptionD(rs.getString("option_d"));
+                question.setCorrectAnswer(rs.getString("correct_answer"));
+                questions.add(question);
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return questions;
+    }
+
+    private Integer getCourseId(String courseName) {
+        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement ps = connection.prepareStatement("SELECT course_id FROM courses WHERE course_name = ?")) {
+            ps.setString(1, courseName);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                return rs.getInt("course_id");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    private void storeCertificateData(Integer userId, Integer courseId, int score) {
+        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+             PreparedStatement ps = connection.prepareStatement(
+                     "INSERT INTO certificates (user_id, course_id, score, issue_date) VALUES (?, ?, ?, ?)")) {
+            ps.setInt(1, userId);
+            ps.setInt(2, courseId);
+            ps.setInt(3, score);
+            ps.setDate(4, new java.sql.Date(System.currentTimeMillis()));
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private String renderCertificateHtml(HttpServletRequest request, HttpServletResponse response,
+                                         String userName, String courseName, int score) throws ServletException, IOException {
+        request.setAttribute("userName", userName);
+        request.setAttribute("courseName", courseName);
+        request.setAttribute("score", score);
+
+        StringWriter stringWriter = new StringWriter();
+        RequestDispatcher dispatcher = request.getRequestDispatcher("certificate.jsp");
+        dispatcher.include(request, new HttpServletResponseWrapper(response) {
+            @Override
+            public PrintWriter getWriter() {
+                return new PrintWriter(stringWriter);
+            }
+        });
+        return stringWriter.toString();
+    }
+
+    private byte[] convertHtmlToPdf(String htmlContent) {
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        HtmlConverter.convertToPdf(htmlContent, outputStream);
+        return outputStream.toByteArray();
+    }
+
+    private boolean sendCertificateEmail(String userEmail, String userName, String courseName, byte[] pdfBytes) {
+        final String fromEmail = "projecteasylearn1@gmail.com";
+        final String emailPassword = "\"ujgd tnxt nrsj rfbq";
+
+        Properties properties = new Properties();
+        properties.put("mail.smtp.host", "smtp.gmail.com");
+        properties.put("mail.smtp.port", "587");
+        properties.put("mail.smtp.auth", "true");
+        properties.put("mail.smtp.starttls.enable", "true");
+
+        Session session = Session.getInstance(properties, new Authenticator() {
+            protected PasswordAuthentication getPasswordAuthentication() {
+                return new PasswordAuthentication(fromEmail, emailPassword);
+            }
+        });
+
+        try {
+            Message message = new MimeMessage(session);
+            message.setFrom(new InternetAddress(fromEmail));
+            message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(userEmail));
+            message.setSubject("Your Certificate for " + courseName);
+
+            MimeBodyPart textPart = new MimeBodyPart();
+            textPart.setText("Dear " + userName + ",\n\nCongratulations! Please find your certificate attached.");
+
+            MimeBodyPart attachmentPart = new MimeBodyPart();
+            DataSource dataSource = new ByteArrayDataSource(pdfBytes, "application/pdf");
+            attachmentPart.setDataHandler(new DataHandler(dataSource));
+            attachmentPart.setFileName(courseName + "_" + userName + "_Certificate.pdf");
+            Multipart multipart = new MimeMultipart();
+            multipart.addBodyPart(textPart);
+            multipart.addBodyPart(attachmentPart);
+
+            message.setContent(multipart);
+            Transport.send(message);
+            return true;
+        } catch (MessagingException e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+}

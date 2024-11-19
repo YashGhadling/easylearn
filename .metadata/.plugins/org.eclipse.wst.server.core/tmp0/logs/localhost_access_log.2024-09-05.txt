@@ -1,0 +1,14 @@
+127.0.0.1 - - [05/Sep/2024:21:26:46 +0530] "GET / HTTP/1.1" 404 752
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:26:48 +0530] "GET /EasyLearn/ HTTP/1.1" 200 6496
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:26:48 +0530] "GET /favicon.ico HTTP/1.1" 404 763
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:26:53 +0530] "GET /EasyLearn/loginuser.jsp HTTP/1.1" 200 3015
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:26:53 +0530] "GET /EasyLearn/your-logo-path.png HTTP/1.1" 404 784
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:26:59 +0530] "POST /EasyLearn/loginuser HTTP/1.1" 302 -
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:26:59 +0530] "GET /EasyLearn/loginuser.jsp?error=Database%20error HTTP/1.1" 200 3015
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:26:59 +0530] "GET /EasyLearn/your-logo-path.png HTTP/1.1" 404 784
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:27:07 +0530] "POST /EasyLearn/loginuser HTTP/1.1" 302 -
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:27:07 +0530] "GET /EasyLearn/loginuser.jsp?error=Database%20error HTTP/1.1" 200 3015
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:27:07 +0530] "GET /EasyLearn/your-logo-path.png HTTP/1.1" 404 784
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:27:27 +0530] "POST /EasyLearn/loginuser HTTP/1.1" 302 -
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:27:27 +0530] "GET /EasyLearn/index.jsp HTTP/1.1" 200 6711
+0:0:0:0:0:0:0:1 - - [05/Sep/2024:21:27:31 +0530] "GET /EasyLearn/profile.jsp HTTP/1.1" 200 2776
